@@ -14,12 +14,7 @@ from ..tools._dct2d_tools import dct2d, idct2d
 
 
 def _shrinkageOperator(matrix, epsilon):
-    temp1 = matrix - epsilon
-    temp1[temp1 < 0] = 0
-    temp2 = matrix + epsilon
-    temp2[temp2 > 0] = 0
-    res = temp1 + temp2
-    return res
+    return jnp.sign(matrix) * jnp.maximum(jnp.abs(matrix) - epsilon, 0)
 
 
 def inexact_alm_rspca_l1(images, weight=None, **kwargs):
@@ -60,7 +55,7 @@ def inexact_alm_rspca_l1(images, weight=None, **kwargs):
     B1_uplimit = jnp.min(images)
     B1_offset = 0
     #A_uplimit = jnp.expand_dims(jnp.min(images, axis=1), 1)
-    A_inmask = jnp.zeros((p, q))
+    A_inmask = np.zeros((p, q))
     A_inmask[int(jnp.round(p / 6) - 1): int(jnp.round(p*5 / 6)), int(jnp.round(q / 6) - 1): int(jnp.round(q * 5 / 6))] = 1
 
     # main iteration loop starts
@@ -96,14 +91,16 @@ def inexact_alm_rspca_l1(images, weight=None, **kwargs):
         E1_hat = _shrinkageOperator(E1_hat, weight / (ent1 * mu))
         R1 = images - E1_hat
         A1_coeff = jnp.mean(R1, 0) / jnp.mean(R1)
-        A1_coeff[A1_coeff < 0] = 0
+        A1_coeff.at[A1_coeff < 0].set(0)
 
         if settings.darkfield:
             validA1coeff_idx = jnp.where(A1_coeff < 1)
-
+            R1=np.array(R1)
             B1_coeff = (jnp.mean(R1[jnp.reshape(W_idct_hat, -1, order='F') > jnp.mean(W_idct_hat) - 1e-6][:, validA1coeff_idx[0]], 0) - \
             jnp.mean(R1[jnp.reshape(W_idct_hat, -1, order='F') < jnp.mean(W_idct_hat) + 1e-6][:, validA1coeff_idx[0]], 0)) / jnp.mean(R1)
             k = jnp.array(validA1coeff_idx).shape[1]
+            A1_coeff = np.array(A1_coeff)
+            B1_coeff = np.array(B1_coeff)
             temp1 = jnp.sum(A1_coeff[validA1coeff_idx[0]]**2)
             temp2 = jnp.sum(A1_coeff[validA1coeff_idx[0]])
             temp3 = jnp.sum(B1_coeff)

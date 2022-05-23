@@ -196,7 +196,7 @@ def basic(images_list: List, segmentation: List = None, verbosity = True, **kwar
     reweighting_iter = 0
     flag_reweighting = True
     flatfield_last = jnp.ones((nrows, ncols))
-    darkfield_last = jnp.random.randn(nrows, ncols)
+    darkfield_last = np.random.randn(nrows, ncols)
 
     while flag_reweighting:
         reweighting_iter += 1
