@@ -105,7 +105,7 @@ def background_timelapse(
             R1 = resized_images - E1_hat
             A1_coeff = jnp.mean(R1,1).reshape(-1,1) - jnp.mean(A_offset,1)
 
-            A1_coeff[A1_coeff<0] = 0
+            A1_coeff.at[A1_coeff<0].set(0)
                 
             Z1 = resized_images - A1_hat - E1_hat
 
