@@ -7,6 +7,7 @@ Created on Mon Aug 10 18:53:07 2020
 """
 from typing import List
 import numpy as np
+from jax import numpy as jnp
 from ._settings import settings
 from .tools._resize import _resize_images_list, _resize_image
 from .tools._dct2d_tools import dct2d
@@ -14,8 +15,8 @@ from .tools.inexact_alm_rspca_l1 import inexact_alm_rspca_l1
 
 def background_timelapse(
         images_list: List,
-        flatfield: np.ndarray = None,
-        darkfield: np.ndarray = None,
+        flatfield: jnp.ndarray = None,
+        darkfield: jnp.ndarray = None,
         verbosity = True,
         **kwargs
         ):
@@ -55,7 +56,7 @@ def background_timelapse(
     # Reszing
     # cv2.INTER_LINEAR is not exactly the same method as 'bilinear' in MATLAB
     
-    resized_images = np.stack(_resize_images_list(images_list=images_list, side_size=_working_size))
+    resized_images = jnp.stack(_resize_images_list(images_list=images_list, side_size=_working_size))
     resized_images = resized_images.reshape([-1, nrows * nrows], order = 'F')
 
     resized_flatfield = _resize_image(image = flatfield, side_size = _working_size)
@@ -63,31 +64,31 @@ def background_timelapse(
     if darkfield is not None:
         resized_darkfield = _resize_image(image = darkfield, side_size = _working_size)
     else:
-        resized_darkfield = np.zeros(resized_flatfield.shape, np.uint8)
+        resized_darkfield = jnp.zeros(resized_flatfield.shape, jnp.uint8)
             
-    _weights = np.ones(resized_images.shape)
+    _weights = jnp.ones(resized_images.shape)
     eplson = 0.1
     tol = 1e-6
     for reweighting_iter in range(1,6):
-        W_idct_hat = np.reshape(resized_flatfield, (1,-1), order='F')
-        A_offset = np.reshape(resized_darkfield, (1,-1), order='F')
-        A1_coeff = np.mean(resized_images, 1).reshape([-1,1])
+        W_idct_hat = jnp.reshape(resized_flatfield, (1,-1), order='F')
+        A_offset = jnp.reshape(resized_darkfield, (1,-1), order='F')
+        A1_coeff = jnp.mean(resized_images, 1).reshape([-1,1])
 
         # main iteration loop starts:
-        # The first element of the second array of np.linalg.svd
-        _temp = np.linalg.svd(resized_images, full_matrices=False)[1]
+        # The first element of the second array of jnp.linalg.svd
+        _temp = jnp.linalg.svd(resized_images, full_matrices=False)[1]
         norm_two = _temp[0]
 
         mu = 12.5/norm_two # this one can be tuned
         mu_bar = mu * 1e7
         rho = 1.5 # this one can be tuned
-        d_norm = np.linalg.norm(resized_images, ord = 'fro')
+        d_norm = jnp.linalg.norm(resized_images, ord = 'fro')
         ent1 = 1
         _iter = 0
         total_svd = 0
         converged = False;
-        A1_hat = np.zeros(resized_images.shape)
-        E1_hat = np.zeros(resized_images.shape)
+        A1_hat = jnp.zeros(resized_images.shape)
+        E1_hat = jnp.zeros(resized_images.shape)
         Y1 = 0
             
         while not converged:
@@ -95,14 +96,14 @@ def background_timelapse(
             A1_hat = W_idct_hat * A1_coeff + A_offset
 
             # update E1 using l0 norm
-            E1_hat = E1_hat + np.divide((resized_images - A1_hat - E1_hat + (1/mu)*Y1), ent1)
-            E1_hat = np.maximum(E1_hat - _weights/(ent1*mu), 0) +\
-                     np.minimum(E1_hat + _weights/(ent1*mu), 0)
+            E1_hat = E1_hat + jnp.divide((resized_images - A1_hat - E1_hat + (1/mu)*Y1), ent1)
+            E1_hat = jnp.maximum(E1_hat - _weights/(ent1*mu), 0) +\
+                     jnp.minimum(E1_hat + _weights/(ent1*mu), 0)
             # update A1_coeff, A2_coeff and A_offset
             #if coeff_flag
             
             R1 = resized_images - E1_hat
-            A1_coeff = np.mean(R1,1).reshape(-1,1) - np.mean(A_offset,1)
+            A1_coeff = jnp.mean(R1,1).reshape(-1,1) - jnp.mean(A_offset,1)
 
             A1_coeff[A1_coeff<0] = 0
                 
@@ -113,7 +114,7 @@ def background_timelapse(
             mu = min(mu*rho, mu_bar)
                 
             # stop Criterion  
-            stopCriterion = np.linalg.norm(Z1, ord = 'fro') / d_norm
+            stopCriterion = jnp.linalg.norm(Z1, ord = 'fro') / d_norm
             # print(stopCriterion, tol)
             if stopCriterion < tol:
                 converged = True
@@ -121,17 +122,17 @@ def background_timelapse(
             #     print('stop')
                 
         # updating weight
-        # XE_norm = E1_hat / np.mean(A1_hat)
+        # XE_norm = E1_hat / jnp.mean(A1_hat)
         XE_norm = E1_hat
-        mean_vec = np.mean(A1_hat, axis=1)
+        mean_vec = jnp.mean(A1_hat, axis=1)
         if verbosity:
             print("reweighting_iter:", reweighting_iter)
-        XE_norm = np.transpose(np.tile(mean_vec, (nrows * nrows, 1))) / (XE_norm + 1e-6)
+        XE_norm = jnp.transpose(jnp.tile(mean_vec, (nrows * nrows, 1))) / (XE_norm + 1e-6)
         _weights = 1./(abs(XE_norm)+eplson)
 
-        _weights = np.divide( np.multiply(_weights, _weights.shape[0] * _weights.shape[1]), np.sum(_weights))
+        _weights = jnp.divide( jnp.multiply(_weights, _weights.shape[0] * _weights.shape[1]), jnp.sum(_weights))
 
-    return np.squeeze(A1_coeff) 
+    return jnp.squeeze(A1_coeff) 
 
 
 def basic(images_list: List, segmentation: List = None, verbosity = True, **kwargs):
@@ -169,33 +170,33 @@ def basic(images_list: List, segmentation: List = None, verbosity = True, **kwar
     
     _saved_size = images_list[0].shape
 
-    D = np.dstack(_resize_images_list(images_list=images_list, side_size=_working_size))
+    D = jnp.dstack(_resize_images_list(images_list=images_list, side_size=_working_size))
 
-    meanD = np.mean(D, axis=2)
-    meanD = meanD / np.mean(meanD)
-    W_meanD = dct2d(meanD.T)
+    meanD = jnp.mean(D, axis=2)
+    meanD = meanD / jnp.mean(meanD)
+    W_meanD = dct2d(np.array(meanD.T))
     if settings.lambda_flatfield == 0:
-        setattr(settings, 'lambda_flatfield', np.sum(np.abs(W_meanD)) / 400 * 0.5)
+        setattr(settings, 'lambda_flatfield', jnp.sum(jnp.abs(W_meanD)) / 400 * 0.5)
     if settings.lambda_darkfield == 0:
         setattr(settings, 'lambda_darkfield', settings.lambda_flatfield * 0.2)
 
     # TODO: Ask Tingying whether to keep sorting? I remember the sorting caused some problems with some data.
-    D = np.sort(D, axis=2)
+    D = jnp.sort(D, axis=2)
 
-    XAoffset = np.zeros((nrows, ncols))
-    weight = np.ones(D.shape)
+    XAoffset = jnp.zeros((nrows, ncols))
+    weight = jnp.ones(D.shape)
 
     if segmentation is not None:
-        segmentation = np.array(segmentation)
-        segmentation = np.transpose(segmentation, (1, 2, 0))
+        segmentation = jnp.array(segmentation)
+        segmentation = jnp.transpose(segmentation, (1, 2, 0))
         for i in range(weight.shape[2]):
             weight[segmentation] = 1e-6
         # weight[options.segmentation] = 1e-6
 
     reweighting_iter = 0
     flag_reweighting = True
-    flatfield_last = np.ones((nrows, ncols))
-    darkfield_last = np.random.randn(nrows, ncols)
+    flatfield_last = jnp.ones((nrows, ncols))
+    darkfield_last = jnp.random.randn(nrows, ncols)
 
     while flag_reweighting:
         reweighting_iter += 1
@@ -207,42 +208,42 @@ def basic(images_list: List, segmentation: List = None, verbosity = True, **kwar
             raise IOError('Initial flatfield option not implemented yet!')
         else:
             X_k_A, X_k_E, X_k_Aoffset = inexact_alm_rspca_l1(D, weight=weight);
-        XA = np.reshape(X_k_A, [nrows, ncols, -1], order='F')
-        XE = np.reshape(X_k_E, [nrows, ncols, -1], order='F')
-        XAoffset = np.reshape(X_k_Aoffset, [nrows, ncols], order='F')
-        XE_norm = XE / np.mean(XA, axis=(0, 1))
+        XA = jnp.reshape(X_k_A, [nrows, ncols, -1], order='F')
+        XE = jnp.reshape(X_k_E, [nrows, ncols, -1], order='F')
+        XAoffset = jnp.reshape(X_k_Aoffset, [nrows, ncols], order='F')
+        XE_norm = XE / jnp.mean(XA, axis=(0, 1))
 
         # Update the weights:
-        weight = np.ones_like(XE_norm) / (np.abs(XE_norm) + settings.eplson)
+        weight = jnp.ones_like(XE_norm) / (jnp.abs(XE_norm) + settings.eplson)
         if segmentation is not None:
             weight[segmentation] = 0
 
-        weight = weight * weight.size / np.sum(weight)
+        weight = weight * weight.size / jnp.sum(weight)
 
-        temp = np.mean(XA, axis=2) - XAoffset
-        flatfield_current = temp / np.mean(temp)
+        temp = jnp.mean(XA, axis=2) - XAoffset
+        flatfield_current = temp / jnp.mean(temp)
         darkfield_current = XAoffset
-        mad_flatfield = np.sum(np.abs(flatfield_current - flatfield_last)) / np.sum(np.abs(flatfield_last))
-        temp_diff = np.sum(np.abs(darkfield_current - darkfield_last))
+        mad_flatfield = jnp.sum(jnp.abs(flatfield_current - flatfield_last)) / jnp.sum(jnp.abs(flatfield_last))
+        temp_diff = jnp.sum(jnp.abs(darkfield_current - darkfield_last))
         if temp_diff < 1e-7:
             mad_darkfield = 0
         else:
-            mad_darkfield = temp_diff / np.maximum(np.sum(np.abs(darkfield_last)), 1e-6)
+            mad_darkfield = temp_diff / jnp.maximum(jnp.sum(jnp.abs(darkfield_last)), 1e-6)
         flatfield_last = flatfield_current
         darkfield_last = darkfield_current
-        if np.maximum(mad_flatfield,
+        if jnp.maximum(mad_flatfield,
                       mad_darkfield) <= settings.reweight_tolerance or \
                 reweighting_iter >= settings.max_reweight_iterations:
             flag_reweighting = False
 
-    shading = np.mean(XA, 2) - XAoffset
+    shading = jnp.mean(XA, 2) - XAoffset
 
     flatfield = _resize_image(
         image = shading, 
         x_side_size = _saved_size[0], 
         y_side_size = _saved_size[1]
     )
-    flatfield = flatfield / np.mean(flatfield)
+    flatfield = flatfield / jnp.mean(flatfield)
 
     if settings.darkfield:
         darkfield = _resize_image(
@@ -251,15 +252,15 @@ def basic(images_list: List, segmentation: List = None, verbosity = True, **kwar
             y_side_size = _saved_size[1]
         )
     else:
-        darkfield = np.zeros_like(flatfield)
+        darkfield = jnp.zeros_like(flatfield)
 
     return flatfield, darkfield
 
 def correct_illumination(
     images_list: List, 
-    flatfield: np.ndarray = None, 
-    darkfield: np.ndarray = None,
-    background_timelapse: np.ndarray = None,
+    flatfield: jnp.ndarray = None, 
+    darkfield: jnp.ndarray = None,
+    background_timelapse: jnp.ndarray = None,
 ):
     """
     Applies the illumination correction on a list of input images 
