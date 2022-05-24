@@ -64,9 +64,9 @@ def background_timelapse(
     if darkfield is not None:
         resized_darkfield = _resize_image(image = darkfield, side_size = _working_size)
     else:
-        resized_darkfield = jnp.zeros(resized_flatfield.shape, jnp.uint8)
+        resized_darkfield = jnp.zeros(resized_flatfield.shape,dtype=np.float32)
             
-    _weights = jnp.ones(resized_images.shape)
+    _weights = jnp.ones(resized_images.shape,dtype=np.float32)
     eplson = 0.1
     tol = 1e-6
     for reweighting_iter in range(1,6):
@@ -87,8 +87,8 @@ def background_timelapse(
         _iter = 0
         total_svd = 0
         converged = False;
-        A1_hat = jnp.zeros(resized_images.shape)
-        E1_hat = jnp.zeros(resized_images.shape)
+        A1_hat = jnp.zeros(resized_images.shape,dtype=np.float32)
+        E1_hat = jnp.zeros(resized_images.shape,dtype=np.float32)
         Y1 = 0
             
         while not converged:
@@ -96,7 +96,7 @@ def background_timelapse(
             A1_hat = W_idct_hat * A1_coeff + A_offset
 
             # update E1 using l0 norm
-            E1_hat = E1_hat + jnp.divide((resized_images - A1_hat - E1_hat + (1/mu)*Y1), ent1)
+            E1_hat = E1_hat + jnp.divide((resized_images - A1_hat - E1_hat + (1/mu)*Y1), ent1).astype(np.float32)
             E1_hat = jnp.maximum(E1_hat - _weights/(ent1*mu), 0) +\
                      jnp.minimum(E1_hat + _weights/(ent1*mu), 0)
             # update A1_coeff, A2_coeff and A_offset
@@ -131,6 +131,7 @@ def background_timelapse(
         _weights = 1./(abs(XE_norm)+eplson)
 
         _weights = jnp.divide( jnp.multiply(_weights, _weights.shape[0] * _weights.shape[1]), jnp.sum(_weights))
+        _weights = _weights.astype(np.float32)
 
     return jnp.squeeze(A1_coeff) 
 
@@ -183,8 +184,8 @@ def basic(images_list: List, segmentation: List = None, verbosity = True, **kwar
     # TODO: Ask Tingying whether to keep sorting? I remember the sorting caused some problems with some data.
     D = jnp.sort(D, axis=2)
 
-    XAoffset = jnp.zeros((nrows, ncols))
-    weight = jnp.ones(D.shape)
+    XAoffset = jnp.zeros((nrows, ncols),dtype=np.float32)
+    weight = jnp.ones(D.shape,dtype=np.float32)
 
     if segmentation is not None:
         segmentation = jnp.array(segmentation)
@@ -195,7 +196,7 @@ def basic(images_list: List, segmentation: List = None, verbosity = True, **kwar
 
     reweighting_iter = 0
     flag_reweighting = True
-    flatfield_last = jnp.ones((nrows, ncols))
+    flatfield_last = jnp.ones((nrows, ncols),dtype=np.float32)
     darkfield_last = np.random.randn(nrows, ncols)
 
     while flag_reweighting:
@@ -214,7 +215,7 @@ def basic(images_list: List, segmentation: List = None, verbosity = True, **kwar
         XE_norm = XE / jnp.mean(XA, axis=(0, 1))
 
         # Update the weights:
-        weight = jnp.ones_like(XE_norm) / (jnp.abs(XE_norm) + settings.eplson)
+        weight = jnp.ones_like(XE_norm,dtype=np.float32) / (jnp.abs(XE_norm) + settings.eplson)
         if segmentation is not None:
             weight[segmentation] = 0
 
@@ -252,7 +253,7 @@ def basic(images_list: List, segmentation: List = None, verbosity = True, **kwar
             y_side_size = _saved_size[1]
         )
     else:
-        darkfield = jnp.zeros_like(flatfield)
+        darkfield = jnp.zeros_like(flatfield,dtype=np.float32)
 
     return flatfield, darkfield
 

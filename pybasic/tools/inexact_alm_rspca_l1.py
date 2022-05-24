@@ -33,7 +33,7 @@ def inexact_alm_rspca_l1(images, weight=None, **kwargs):
     if weight is not None:
         weight = jnp.reshape(weight, (m, n), order='F')
     else:
-        weight = jnp.ones_like(images)
+        weight = jnp.ones_like(images,dtype=np.float32)
     svd = jnp.linalg.svd(images, False, False) #TODO: Is there a more efficient implementation of SVD?
     norm_two = svd[0]
     Y1 = 0
@@ -41,21 +41,21 @@ def inexact_alm_rspca_l1(images, weight=None, **kwargs):
     ent1 = 1
     ent2 = 10
 
-    A1_hat = jnp.zeros_like(images)
+    A1_hat = jnp.zeros_like(images,dtype=np.float32)
     A1_coeff = jnp.ones((1, images.shape[1]))
 
-    E1_hat = jnp.zeros_like(images)
-    W_hat = dct2d(np.array(jnp.zeros((p, q)).T))
+    E1_hat = jnp.zeros_like(images,dtype=np.float32)
+    W_hat = dct2d(np.array(jnp.zeros((p, q),dtype=np.float32).T))
     mu = 12.5 / norm_two
     mu_bar = mu * 1e7
     rho = 1.5
     d_norm = jnp.linalg.norm(images, ord='fro')
 
-    A_offset = jnp.zeros((m, 1))
+    A_offset = jnp.zeros((m, 1),dtype=np.float32)
     B1_uplimit = jnp.min(images)
     B1_offset = 0
     #A_uplimit = jnp.expand_dims(jnp.min(images, axis=1), 1)
-    A_inmask = np.zeros((p, q))
+    A_inmask = np.zeros((p, q),dtype=np.float32)
     A_inmask[int(jnp.round(p / 6) - 1): int(jnp.round(p*5 / 6)), int(jnp.round(q / 6) - 1): int(jnp.round(q * 5 / 6))] = 1
 
     # main iteration loop starts
@@ -94,10 +94,10 @@ def inexact_alm_rspca_l1(images, weight=None, **kwargs):
         A1_coeff.at[A1_coeff < 0].set(0)
 
         if settings.darkfield:
-            validA1coeff_idx = jnp.where(A1_coeff < 1)
+            validA1coeff_idx = np.where(A1_coeff < 1)
             R1=np.array(R1)
-            B1_coeff = (jnp.mean(R1[jnp.reshape(W_idct_hat, -1, order='F') > jnp.mean(W_idct_hat) - 1e-6][:, validA1coeff_idx[0]], 0) - \
-            jnp.mean(R1[jnp.reshape(W_idct_hat, -1, order='F') < jnp.mean(W_idct_hat) + 1e-6][:, validA1coeff_idx[0]], 0)) / jnp.mean(R1)
+            B1_coeff = (jnp.mean(R1[jnp.reshape(W_idct_hat, -1, order='F') > jnp.mean(W_idct_hat) * (1-1e-3)][:, validA1coeff_idx[0]], 0) - \
+            jnp.mean(R1[jnp.reshape(W_idct_hat, -1, order='F') < jnp.mean(W_idct_hat) * (1+1e-3)][:, validA1coeff_idx[0]], 0)) / jnp.mean(R1)
             k = jnp.array(validA1coeff_idx).shape[1]
             A1_coeff = np.array(A1_coeff)
             B1_coeff = np.array(B1_coeff)
@@ -135,8 +135,8 @@ def inexact_alm_rspca_l1(images, weight=None, **kwargs):
             A_offset = A_offset + B_offset
 
 
-        Z1 = images - A1_hat - E1_hat
-        Y1 = Y1 + mu * Z1
+        Z1 = np.array(images - A1_hat - E1_hat,dtype=np.float32)
+        Y1 = np.array(Y1 + mu * Z1,dtype=np.float32)
         mu = jnp.minimum(mu * rho, mu_bar)
 
         # Stop Criterion
