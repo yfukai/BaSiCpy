@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field, PrivateAttr
 from skimage.transform import resize as _resize
 
 from basicpy._jax_routines import ApproximateFit, LadmapFit
-from basicpy.tools.dct2d_tools import JaxDCT
+from basicpy.tools.dct_tools import JaxDCT
 
 # Package modules
 from basicpy.types import ArrayLike, PathLike
@@ -109,6 +109,10 @@ class BaSiC(BaseModel):
     lambda_darkfield_coef: float = Field(
         0.2, description="Relative weight of the darkfield term in the Lagrangian."
     )
+    lambda_darkfield_sparse_coef: float = Field(
+        0.2,
+        description="Relative weight of the darkfield sparse term in the Lagrangian.",
+    )
     max_iterations: int = Field(
         500,
         description="Maximum number of iterations for single optimization.",
@@ -134,6 +138,10 @@ class BaSiC(BaseModel):
     optimization_tol: float = Field(
         1e-6,
         description="Optimization tolerance.",
+    )
+    optimization_tol_diff: float = Field(
+        1e-3,
+        description="Optimization tolerance for update diff.",
     )
     resize_method: ResizeMethod = Field(
         ResizeMethod.CUBIC,
@@ -198,15 +206,15 @@ class BaSiC(BaseModel):
         """
         if self.working_size is not None:
             if np.isscalar(self.working_size):
-                working_shape = [self.working_size] * (Im.ndim - 1)
+                working_shape = [self.working_size] * (Im.ndim - 2)
             else:
-                if not Im.ndim - 1 == len(self.working_size):
+                if not Im.ndim - 2 == len(self.working_size):
                     raise ValueError(
                         "working_size must be a scalar or match the image dimensions"
                     )
                 else:
                     working_shape = self.working_size
-            Im = resize(Im, [Im.shape[0], *working_shape], self.resize_method)
+            Im = resize(Im, [*Im.shape[:2], *working_shape], self.resize_method)
         return Im
 
     def fit(
@@ -231,10 +239,22 @@ class BaSiC(BaseModel):
 
         """
 
-        logger.info("=== BaSiC fit started ===")
-        start_time = time.monotonic()
+        ndim = images.ndim
+        if images.ndim == 3:
+            images = images[:, np.newaxis, ...]
+        elif images.ndim == 4:
+            if self.fitting_mode == FittingMode.approximate:
+                raise ValueError(
+                    "Only 3-dimensional images are accepted for the approximate mode."
+                )
+        else:
+            raise ValueError("images must be 3 or 4-dimensional array")
+
         if fitting_weight is not None and fitting_weight.shape != images.shape:
             raise ValueError("fitting_weight must have the same shape as images.")
+
+        logger.info("=== BaSiC fit started ===")
+        start_time = time.monotonic()
 
         Im = device_put(images).astype(jnp.float32)
         Im = self._resize(Im)
@@ -276,6 +296,8 @@ class BaSiC(BaseModel):
             dict(
                 lambda_flatfield=lambda_flatfield,
                 lambda_darkfield=lambda_flatfield * self.lambda_darkfield_coef,
+                lambda_darkfield_sparse=lambda_flatfield
+                * self.lambda_darkfield_sparse_coef,
                 # matrix 2-norm (largest sing. value)
                 init_mu=init_mu,
                 max_mu=init_mu * self.max_mu_coef,
@@ -299,10 +321,16 @@ class BaSiC(BaseModel):
 
         for i in range(self.max_reweight_iterations):
             logger.info(f"reweighting iteration {i}")
-            S = jnp.zeros(Im2.shape[1:], dtype=jnp.float32)
+            if self.fitting_mode == FittingMode.approximate:
+                S = jnp.zeros(Im2.shape[1:], dtype=jnp.float32)
+            else:
+                S = jnp.ones(Im2.shape[1:], dtype=jnp.float32)
             D_R = jnp.zeros(Im2.shape[1:], dtype=jnp.float32)
             D_Z = 0.0
-            B = jnp.ones(Im2.shape[0], dtype=jnp.float32)
+            if self.fitting_mode == FittingMode.approximate:
+                B = jnp.ones(Im2.shape[0], dtype=jnp.float32)
+            else:
+                B = jnp.mean(Im2, axis=(1, 2, 3))
             I_R = jnp.zeros(Im2.shape, dtype=jnp.float32)
             S, D_R, D_Z, I_R, B, norm_ratio, converged = fitting_step.fit(
                 Im2,
@@ -314,6 +342,7 @@ class BaSiC(BaseModel):
                 I_R,
             )
             logger.info(f"single-step optimization score: {norm_ratio}.")
+            logger.info(f"mean of S: {float(jnp.mean(S))}.")
             self._score = norm_ratio
             if not converged:
                 logger.warning("single-step optimization did not converge.")
@@ -325,7 +354,7 @@ class BaSiC(BaseModel):
             mean_S = jnp.mean(S)
             S = S / mean_S  # flatfields
             B = B * mean_S  # baseline
-            I_B = B[:, newax, newax] * S[newax, ...] + D[newax, ...]
+            I_B = B[:, newax, newax, newax] * S[newax, ...] + D[newax, ...]
             W = fitting_step.calc_weights(I_B, I_R) * Ws2
 
             self._weight = W
@@ -360,7 +389,7 @@ class BaSiC(BaseModel):
             for i in range(self.max_reweight_iterations_baseline):
                 B = jnp.ones(Im.shape[0], dtype=jnp.float32)
                 if self.fitting_mode == FittingMode.approximate:
-                    B = jnp.mean(Im, axis=(1, 2))
+                    B = jnp.mean(Im, axis=(1, 2, 3))
                 I_R = jnp.zeros(Im.shape, dtype=jnp.float32)
                 logger.info(f"reweighting iteration for baseline {i}")
                 I_R, B, norm_ratio, converged = fitting_step.fit_baseline(
@@ -372,14 +401,18 @@ class BaSiC(BaseModel):
                     I_R,
                 )
 
-                I_B = B[:, newax, newax] * S[newax, ...] + D[newax, ...]
+                I_B = B[:, newax, newax, newax] * S[newax, ...] + D[newax, ...]
                 W = fitting_step.calc_weights_baseline(I_B, I_R) * Ws
                 self._weight = W
                 self._residual = I_R
                 logger.info(f"Iteration {i} finished.")
 
-        self.flatfield = S
-        self.darkfield = D
+        if ndim == 3:
+            self.flatfield = S[0]
+            self.darkfield = D[0]
+        else:
+            self.flatfield = S
+            self.darkfield = D
         self.baseline = B
         logger.info(
             f"=== BaSiC fit finished in {time.monotonic()-start_time} seconds ==="
