@@ -58,6 +58,7 @@ class BaseFit(BaseModel):
     )
 
     class Config:
+        frozen = True  # for python 3.7
         extra = "ignore"
 
     def _cond(self, vals):

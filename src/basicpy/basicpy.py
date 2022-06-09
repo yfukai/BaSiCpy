@@ -176,7 +176,7 @@ class BaSiC(BaseModel):
     _profiles_fname = "profiles.npy"
 
     class Config:
-
+        frozen = True  # for python 3.7
         arbitrary_types_allowed = True
 
     def __init__(self, **kwargs) -> None:
