@@ -8,7 +8,7 @@ from basicpy import BaSiC
 
 @click.command
 @click.argument("input_path")
-@click.argument("output_path")
+@click.argument("output_folder")
 @click.option("smoothness_flatfield")
 @click.option("smoothness_darkfield")
 def main(
