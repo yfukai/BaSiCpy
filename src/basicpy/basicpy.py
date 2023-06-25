@@ -169,6 +169,10 @@ class BaSiC(BaseModel):
         128,
         description="Size for running computations. None means no rescaling.",
     )
+    approx_rescale_parameters: bool = Field(
+        True,
+        description="Whether or not to rescale parameters for the approx fit.",
+    )
 
     # Private attributes for internal processing
     _score: float = PrivateAttr(None)
@@ -350,7 +354,10 @@ class BaSiC(BaseModel):
             Im2 = Im
             Ws2 = Ws
 
-        if self.fitting_mode == FittingMode.approximate:
+        if (
+            self.fitting_mode == FittingMode.approximate
+            and self.approx_rescale_parameters
+        ):
             mean_image = jnp.mean(Im2, axis=0)
             mean_image = mean_image / jnp.mean(Im2)
             mean_image_dct = JaxDCT.dct3d(mean_image.T)
