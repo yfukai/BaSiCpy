@@ -13,3 +13,5 @@ ENV PATH=/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:
 
 # Installing basicpy and other pip packages
 RUN pip --no-cache-dir install jupyterlab git+https://github.com/yfukai/BaSiCPy@autosegment
+
+ENTRYPOINT [ "bash" ]
