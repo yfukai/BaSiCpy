@@ -163,3 +163,4 @@ misc_notebooks/wsi_darkfields.npy
 misc_notebooks/wsi_flatfields.npy
 
 *.sif
+core.*
