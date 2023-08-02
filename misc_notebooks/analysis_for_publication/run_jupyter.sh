@@ -9,7 +9,8 @@ docker run -it --rm \
   -v ${HOME}/.jupyter:${HOME}/.jupyter \
   -p8988:8988 \
   -e DISPLAY=$DISPLAY \
-  -e TZ=Asia/Tokyo --gpus=all \
+  -e TZ=Asia/Tokyo \
+  --gpus=all \
   yfukai/basicpy-benchmark:latest 
  # -f $(id -gn) -g $(id -g) -t $(id -nu) -u $(id -u) -p ${HOME} \
  # -- jupyter lab --ip=0.0.0.0 --port 8988
