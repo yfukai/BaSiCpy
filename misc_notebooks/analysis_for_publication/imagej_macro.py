@@ -1,6 +1,7 @@
 # @File(label="Select a slide to process") filename
 # @Float(label="Flat field smoothing parameter (0 for automatic)", value=0.1) lambda_flat
 # @Float(label="Dark field smoothing parameter (0 for automatic)", value=0.01) lambda_dark
+# @Integer(label="Estimate Darkfield") get_darkfield
 
 # NOTE... modified from https://github.com/labsyspharm/basic-illumination/blob/master/imagej_basic_ashlar.py
 
@@ -26,6 +27,9 @@ import time
 import pdb
 
 def main():
+    _get_darkfield = get_darkfield>0
+    print(_get_darkfield)
+    print(filename)
     
     # The internal initialization of the BaSiC code fails when we invoke it via
     # scripting, unless we explicitly set a the private 'noOfSlices' field.
@@ -45,7 +49,8 @@ def main():
 
     basic.exec(
         input_image, None, None,
-        "Estimate shading profiles", "Estimate both flat-field and dark-field",
+        "Estimate shading profiles", 
+        "Estimate both flat-field and dark-field" if _get_darkfield else "Estimate flat-field only (ignore dark-field)",
         lambda_estimate, lambda_flat, lambda_dark,
         "Ignore", "Compute shading only"
     )
@@ -57,15 +62,24 @@ def main():
     start = time.time()
     basic.exec(
         input_image, None, None,
-        "Estimate shading profiles", "Estimate both flat-field and dark-field",
+        "Estimate shading profiles", 
+        "Estimate both flat-field and dark-field" if _get_darkfield else "Estimate flat-field only (ignore dark-field)",
         lambda_estimate, lambda_flat, lambda_dark,
         "Ignore", "Compute shading only"
     )
     stop = time.time()
     print("erapsed time: %s" % (stop - start))
     input_image.close()
-    flatfield = WindowManager.getImage("Flat-field:%s" % input_image.title)
+
     stem=str(filename).split("/")[-1].split(".")[0]
     output_dir="/".join(str(filename).split("/")[:-1])
-    IJ.saveAsTiff(flatfield, str(output_dir) + "/%s_flatfield.tif"%stem)
+    suffix = "with_darkfield" if _get_darkfield else "no_darkfield"
+
+    print(stem)
+    flatfield = WindowManager.getImage("Flat-field:%s" % input_image.title)
+    IJ.saveAsTiff(flatfield, str(output_dir) + "/%s_flatfield_%s.tif"%(stem, suffix))
+
+    if _get_darkfield:
+        darkfield = WindowManager.getImage("Dark-field:%s" % input_image.title)
+        IJ.saveAsTiff(darkfield, str(output_dir) + "/%s_darkfield_%s.tif"%(stem, suffix))
 main()
