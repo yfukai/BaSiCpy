@@ -10,7 +10,7 @@ import time
 from enum import Enum
 from multiprocessing import cpu_count
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import jax.numpy as jnp
 
@@ -22,10 +22,11 @@ from jax import device_put
 from jax.image import ResizeMethod
 from jax.image import resize as jax_resize
 from pydantic import BaseModel, Field, PrivateAttr, root_validator
+from skimage.filters import threshold_otsu
 from skimage.transform import resize as skimage_resize
 
 from basicpy._jax_routines import ApproximateFit, LadmapFit
-from basicpy.metrics import entropy
+from basicpy.metrics import autotune_cost
 from basicpy.tools.dct_tools import JaxDCT
 
 # Package modules
@@ -110,6 +111,13 @@ class BaSiC(BaseModel):
     sparse_cost_darkfield: float = Field(
         0.01, description="Weight of the darkfield sparse term in the Lagrangian."
     )
+    autosegment: Union[bool, Callable[[np.ndarray], np.ndarray]] = Field(
+        False,
+        description="When not False, automatically segment the image before fitting."
+        "When True, `threshold_otsu` from `scikit-image` is used "
+        "and the brighter pixels are taken."
+        "When a callable is given, it is used as the segmentation function.",
+    )
     max_iterations: int = Field(
         500,
         description="Maximum number of iterations for single optimization.",
@@ -161,6 +169,10 @@ class BaSiC(BaseModel):
         128,
         description="Size for running computations. None means no rescaling.",
     )
+    approx_rescale_parameters: bool = Field(
+        True,
+        description="Whether or not to rescale parameters for the approx fit.",
+    )
 
     # Private attributes for internal processing
     _score: float = PrivateAttr(None)
@@ -208,7 +220,7 @@ class BaSiC(BaseModel):
 
         elif self.resize_mode == ResizeMode.skimage:
             Im = skimage_resize(
-                Im, target_shape, preserve_range=True, **self.resize_params
+                np.array(Im), target_shape, preserve_range=True, **self.resize_params
             )
             return device_put(Im).astype(jnp.float32)
 
@@ -220,7 +232,7 @@ class BaSiC(BaseModel):
                 da.from_array(
                     [
                         skimage_resize(
-                            Im[tuple(inds)],
+                            np.array(Im[tuple(inds)]),
                             target_shape[-2:],
                             preserve_range=True,
                             **self.resize_params,
@@ -249,6 +261,16 @@ class BaSiC(BaseModel):
             Im = self._resize(Im, target_shape)
 
         return Im
+
+    def _perform_segmentation(self, Im):
+        """Perform segmentation on the images."""
+        if not self.autosegment:
+            return np.ones_like(Im, dtype=bool)
+        elif self.autosegment is True:
+            th = threshold_otsu(Im)
+            return Im > th
+        else:
+            return self.autosegment(Im)
 
     def fit(
         self,
@@ -321,6 +343,8 @@ class BaSiC(BaseModel):
         else:
             Ws = jnp.ones_like(Im)
 
+        Ws = Ws * self._perform_segmentation(Im)
+
         # Im2 and Ws2 will possibly be sorted
         if self.sort_intensity:
             inds = jnp.argsort(Im, axis=0)
@@ -330,7 +354,10 @@ class BaSiC(BaseModel):
             Im2 = Im
             Ws2 = Ws
 
-        if self.fitting_mode == FittingMode.approximate:
+        if (
+            self.fitting_mode == FittingMode.approximate
+            and self.approx_rescale_parameters
+        ):
             mean_image = jnp.mean(Im2, axis=0)
             mean_image = mean_image / jnp.mean(Im2)
             mean_image_dct = JaxDCT.dct3d(mean_image.T)
@@ -359,7 +386,7 @@ class BaSiC(BaseModel):
         if self.fitting_mode == FittingMode.approximate:
             init_mu = self.mu_coef / spectral_norm
         else:
-            init_mu = self.mu_coef / spectral_norm / np.product(Im2.shape)
+            init_mu = self.mu_coef / spectral_norm / np.prod(Im2.shape)
         fit_params = self.dict()
         fit_params.update(
             dict(
@@ -586,7 +613,11 @@ class BaSiC(BaseModel):
     # REFACTOR large datasets will probably prefer saving corrected images to
     # files directly, a generator may be handy
     def fit_transform(
-        self, images: ArrayLike, timelapse: bool = False
+        self,
+        images: ArrayLike,
+        fitting_weight: Optional[np.ndarray] = None,
+        skip_shape_warning=False,
+        timelapse: bool = False,
     ) -> Union[Tuple[np.ndarray, np.ndarray], np.ndarray]:
         """Fit and transform on data.
 
@@ -599,7 +630,9 @@ class BaSiC(BaseModel):
         Example:
             >>> corrected = basic.fit_transform(images)
         """
-        self.fit(images)
+        self.fit(
+            images, fitting_weight=fitting_weight, skip_shape_warning=skip_shape_warning
+        )
         corrected = self.transform(images, timelapse)
 
         return corrected
@@ -617,10 +650,16 @@ class BaSiC(BaseModel):
         timelapse: bool = False,
         histogram_qmin: float = 0.01,
         histogram_qmax: float = 0.99,
-        histogram_bins: int = 100,
+        vmin_factor: float = 0.6,
+        vrange_factor: float = 1.5,
+        histogram_bins: int = 1000,
         histogram_use_fitting_weight: bool = True,
+        fourier_l0_norm_image_threshold: float = 0.1,
+        fourier_l0_norm_fourier_radius=10,
+        fourier_l0_norm_threshold=1e-3,
+        fourier_l0_norm_cost_coef=1e4,
         early_stop: bool = True,
-        early_stop_n_iter_no_change: int = 10,
+        early_stop_n_iter_no_change: int = 15,
         early_stop_torelance: float = 1e-6,
         random_state: Optional[int] = None,
     ) -> None:
@@ -645,6 +684,16 @@ class BaSiC(BaseModel):
                     Defaults to 0.99.
             histogram_bins: the number of bins to use for the histogram.
                     Defaults to 100.
+            hisogram_use_fitting_weight: if True, uses the weight for the histogram.
+                    Defaults to True.
+            fourier_l0_norm_image_threshold : float
+                The threshold for image values for the fourier L0 norm calculation.
+            fourier_l0_norm_fourier_radius : float
+                The Fourier radius for the fourier L0 norm calculation.
+            fourier_l0_norm_threshold : float
+                The maximum preferred value for the fourier L0 norm.
+            fourier_l0_norm_cost_coef : float
+                The cost coefficient for the fourier L0 norm.
             early_stop: if True, stops the optimization when the change in
                     entropy is less than `early_stop_torelance`.
                     Defaults to True.
@@ -658,16 +707,26 @@ class BaSiC(BaseModel):
 
         if search_space is None:
             search_space = {
-                "smoothness_flatfield": list(np.logspace(-3, 1, 20)),
-                "smoothness_darkfield": [0] + list(np.logspace(-3, 1, 20)),
-                "sparse_cost_darkfield": [0] + list(np.logspace(-3, 1, 20)),
+                "smoothness_flatfield": list(np.logspace(-3, 1, 15)),
             }
+            if self.get_darkfield:
+                search_space.update(
+                    {
+                        "smoothness_darkfield": [0] + list(np.logspace(-3, 1, 15)),
+                        "sparse_cost_darkfield": [0] + list(np.logspace(-3, 1, 15)),
+                    }
+                )
         if init_params is None:
             init_params = {
                 "smoothness_flatfield": 0.1,
-                "smoothness_darkfield": 1e-3,
-                "sparse_cost_darkfield": 1e-3,
             }
+            if self.get_darkfield:
+                init_params.update(
+                    {
+                        "smoothness_darkfield": 1e-3,
+                        "sparse_cost_darkfield": 1e-3,
+                    }
+                )
 
         # calculate the histogram range
         basic = self.copy(update=init_params)
@@ -678,7 +737,9 @@ class BaSiC(BaseModel):
         )
         transformed = basic.transform(images, timelapse=timelapse)
         vmin, vmax = np.quantile(transformed, [histogram_qmin, histogram_qmax])
-        val_range = vmax - vmin  # fix the value range for histogram
+        val_range = (
+            vmax - vmin * vmin_factor
+        ) * vrange_factor  # fix the value range for histogram
 
         if fitting_weight is None or not histogram_use_fitting_weight:
             weights = None
@@ -694,17 +755,20 @@ class BaSiC(BaseModel):
                     skip_shape_warning=skip_shape_warning,
                 )
                 transformed = basic.transform(images, timelapse=timelapse)
-                vmin_new = np.quantile(transformed, histogram_qmin)
+                vmin_new = np.quantile(transformed, histogram_qmin) * vmin_factor
 
-                entropy_value = entropy(
+                return -1.0 * autotune_cost(
                     transformed,
-                    vmin=vmin_new,
-                    vmax=vmin_new + val_range,
-                    bins=histogram_bins,
+                    basic.flatfield,
+                    entropy_vmin=vmin_new,
+                    entropy_vmax=vmin_new + val_range,
+                    histogram_bins=histogram_bins,
+                    fourier_l0_norm_cost_coef=fourier_l0_norm_cost_coef,
+                    fourier_l0_norm_image_threshold=fourier_l0_norm_image_threshold,
+                    fourier_l0_norm_fourier_radius=fourier_l0_norm_fourier_radius,
+                    fourier_l0_norm_threshold=fourier_l0_norm_threshold,
                     weights=weights,
-                    clip=True,
                 )
-                return -entropy_value
             except RuntimeError:
                 return -np.inf
 
