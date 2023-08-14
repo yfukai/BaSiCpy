@@ -164,3 +164,4 @@ misc_notebooks/wsi_flatfields.npy
 
 *.sif
 core.*
+misc_notebooks/analysis_for_publication/BaSiC_.java
