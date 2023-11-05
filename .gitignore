@@ -165,3 +165,5 @@ misc_notebooks/wsi_flatfields.npy
 *.sif
 core.*
 misc_notebooks/analysis_for_publication/BaSiC_.java
+misc_notebooks/analysis_for_publication/simulated_cells/w_darkfield2.tif
+misc_notebooks/analysis_for_publication/simulated_cells/wo_darkfield2.tif
