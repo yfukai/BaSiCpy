@@ -1,0 +1,9 @@
+channel_index,fitting_mode,sort_intensity,use_weight,smoothness_flatfield,val_range
+2,ladmap,False,True,0.1,132.80733696842185
+2,ladmap,False,False,0.1,135.00705922508232
+2,approximate,False,True,0.1,130.15049802303315
+2,approximate,False,False,0.1,161.71535633468625
+0,ladmap,False,True,0.1,426.08508305168147
+0,ladmap,False,False,0.1,965.8637042083736
+0,approximate,False,True,0.1,283.3747666854858
+0,approximate,False,False,0.1,487.6259889106749
