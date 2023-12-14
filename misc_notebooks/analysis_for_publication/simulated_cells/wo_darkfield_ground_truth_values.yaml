@@ -3,7 +3,7 @@
   entropy: 2.6187836854363336
   fourier_L0_norm: 0.0
 0_true:
-  autotune_cost: 1990.7507193884278
+  autotune_cost: 10.004675912844355
   entropy: 2.7745992605793828
   fourier_L0_norm: 0.19967362522322804
 2_reference:
@@ -11,6 +11,6 @@
   entropy: 2.5420524294630513
   fourier_L0_norm: 0.0
 2_true:
-  autotune_cost: 1989.9444317406244
+  autotune_cost: 9.198388265040835
   entropy: 2.7321801286066045
   fourier_L0_norm: 0.19967362522322804
